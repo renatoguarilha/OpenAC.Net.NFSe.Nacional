@@ -30,7 +30,6 @@ on:
   push:
     branches:
       - main
-  create:
     tags:
       - v*
 
@@ -69,7 +68,7 @@ jobs:
           echo "Base version: $BASE_VERSION"
           
           # Determine version suffix
-          if [ "${{ github.event_name }}" = "create" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             # Tag event: use tag version without suffix
             TAG_VERSION="${{ github.ref_name }}"
             VERSION="${TAG_VERSION#v}"
@@ -163,11 +162,19 @@ jobs:
       - name: 🔧 Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.x'
+          dotnet-version: |
+            8.x
+            9.x
+            10.x
+      
+      - name: 🔐 NuGet login (Trusted Publishing)
+        uses: NuGet/login@v1
+        id: nuget_login
       
       - name: 📤 Publish to NuGet.org
         run: |
           dotnet nuget push ./artifacts/*.nupkg \
+            --api-key ${{ steps.nuget_login.outputs.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
         env:
