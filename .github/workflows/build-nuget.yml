@@ -11,6 +11,17 @@
 # Publicação:
 # - NuGet.org: Apenas manual, requer checkbox marcada
 # - Usa Trusted Publishing (OIDC) - sem API keys necessárias
+#
+# Configuração Necessária:
+# 1. Trusted Publishing configurado no NuGet.org:
+#    - Package Owner: CMSol.Fiscal (ou o dono do pacote)
+#    - Repository Owner: renatoguarilha
+#    - Repository: OpenAC.Net.NFSe.Nacional
+#    - Workflow File: build-nuget.yml
+#
+# 2. Secret do Repositório:
+#    - NUGET_USERNAME: Nome de usuário ou organização no NuGet.org
+#      (ex: "CMSol.Fiscal" se for organização ou "renatoguarilha" se for usuário)
 
 name: 📦 Build NuGet Package
 
@@ -170,6 +181,8 @@ jobs:
       - name: 🔐 NuGet login (Trusted Publishing)
         uses: NuGet/login@v1
         id: nuget_login
+        with:
+          user: ${{ secrets.NUGET_USERNAME }}
       
       - name: 📤 Publish to NuGet.org
         run: |
