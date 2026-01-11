@@ -1,0 +1,182 @@
+# GitHub Actions Workflow para Build e Publicação de Pacotes NuGet
+#
+# Este workflow constrói o pacote NuGet personalizado CMSol.Fiscal.OpenAC.Net.NFSe.Nacional
+# sem modificar os arquivos .csproj do projeto original.
+#
+# Triggers:
+# - Manual (workflow_dispatch): Build com sufixo customizável e opção de publicar
+# - Push to main: Build automático com sufixo 'fork'
+# - Tags v*: Build com versão da tag e GitHub Release
+#
+# Publicação:
+# - NuGet.org: Apenas manual, requer checkbox marcada
+# - Usa Trusted Publishing (OIDC) - sem API keys necessárias
+
+name: 📦 Build NuGet Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_suffix:
+        description: 'Sufixo da versão (ex: fork, beta, rc)'
+        required: false
+        default: 'fork'
+        type: string
+      publish_to_nuget:
+        description: 'Publicar no NuGet.org?'
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+  create:
+    tags:
+      - v*
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  build:
+    name: 🔨 Build NuGet Package
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+    
+    steps:
+      - name: 🔽 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Get full history for versioning
+      
+      - name: 🔧 Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            9.x
+            10.x
+      
+      - name: 🔢 Calculate version
+        id: version
+        run: |
+          # Get base version from csproj
+          BASE_VERSION=$(grep -oP '<Version>\K[^<]+' src/OpenAC.Net.NFSe.Nacional/OpenAC.Net.NFSe.Nacional.csproj)
+          echo "Base version: $BASE_VERSION"
+          
+          # Determine version suffix
+          if [ "${{ github.event_name }}" = "create" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Tag event: use tag version without suffix
+            TAG_VERSION="${{ github.ref_name }}"
+            VERSION="${TAG_VERSION#v}"
+            echo "Using tag version: $VERSION"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual dispatch: use provided suffix or default
+            SUFFIX="${{ inputs.version_suffix }}"
+            if [ -z "$SUFFIX" ]; then
+              VERSION="$BASE_VERSION"
+            else
+              VERSION="$BASE_VERSION-$SUFFIX"
+            fi
+            echo "Using manual version: $VERSION"
+          else
+            # Push to main: use fork suffix
+            VERSION="$BASE_VERSION-fork"
+            echo "Using automatic version: $VERSION"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Final version: $VERSION"
+      
+      - name: 📦 Pack NuGet package
+        run: |
+          dotnet pack src/OpenAC.Net.NFSe.Nacional/OpenAC.Net.NFSe.Nacional.csproj \
+            --configuration Release \
+            --output ./artifacts \
+            /p:PackageId=CMSol.Fiscal.OpenAC.Net.NFSe.Nacional \
+            /p:Version=${{ steps.version.outputs.version }} \
+            /p:Authors="Renato Guarilha" \
+            /p:Company="CMSol.Fiscal" \
+            /p:PackageTags="OpenAC.Net NFSe Nacional OpenNFSe CMSol Fiscal"
+      
+      - name: 📋 List artifacts
+        run: ls -lah ./artifacts
+      
+      - name: 📤 Upload NuGet package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./artifacts/*.nupkg
+          retention-days: 90
+          if-no-files-found: error
+      
+      - name: 📊 Summary
+        run: |
+          echo "## 📦 NuGet Package Build Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Package **CMSol.Fiscal.OpenAC.Net.NFSe.Nacional** built successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Package Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package ID:** CMSol.Fiscal.OpenAC.Net.NFSe.Nacional" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Company:** CMSol.Fiscal" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** Renato Guarilha" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts are available in the workflow run for 90 days." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📤 Publishing" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.publish_to_nuget }}" = "true" ]; then
+              echo "✅ Will publish to NuGet.org after build" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "ℹ️ Not publishing to NuGet.org (checkbox not selected)" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ Automatic publishing only available via manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  publish-nuget:
+    name: 📤 Publish to NuGet.org
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to_nuget == true
+    
+    permissions:
+      id-token: write  # Necessário para OIDC Trusted Publishing
+      contents: read
+    
+    steps:
+      - name: 🔽 Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: ./artifacts
+      
+      - name: 📦 List artifacts
+        run: ls -la ./artifacts
+      
+      - name: 🔧 Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+      
+      - name: 📤 Publish to NuGet.org
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      
+      - name: ✅ Publication summary
+        run: |
+          echo "## 📤 Package Published to NuGet.org" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Package **CMSol.Fiscal.OpenAC.Net.NFSe.Nacional** published successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 View on NuGet.org: https://www.nuget.org/packages/CMSol.Fiscal.OpenAC.Net.NFSe.Nacional" >> $GITHUB_STEP_SUMMARY
