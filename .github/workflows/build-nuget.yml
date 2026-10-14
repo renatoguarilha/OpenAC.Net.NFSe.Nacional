@@ -55,11 +55,24 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
+            RAW="${GITHUB_REF#refs/tags/v}"
+            # NuGet exige hífen antes do sufixo de pré-release: "1.5.0.3b" é inválido, "1.5.0.3-b" é válido.
+            # Sufixo alfabético colado ao último número vira rótulo de pré-release.
+            if [[ "$RAW" =~ ^([0-9]+(\.[0-9]+){1,3})([A-Za-z][A-Za-z0-9]*)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[3]}"
+              echo "::warning::Tag v$RAW normalizada para $VERSION (NuGet exige hífen antes do sufixo de pré-release)"
+            else
+              VERSION="$RAW"
+            fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="${{ env.BASE_VERSION }}-${{ inputs.version_suffix }}.${{ github.run_number }}"
           else
             VERSION="${{ env.BASE_VERSION }}-fork.${{ github.run_number }}"
+          fi
+          # Falha cedo, antes do build, se a versão não for aceita pelo NuGet (X.Y[.Z[.W]][-prerelease][+build]).
+          if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Versão '$VERSION' inválida para NuGet. Use tag no formato vX.Y.Z[.W][-sufixo], ex.: v1.5.0.3 ou v1.5.0.3-beta."
+            exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
