@@ -25,6 +25,8 @@
 // <summary></summary>
 // ***********************************************************************
 
+using OpenAC.Net.DFe.Core.Storage;
+using OpenAC.Net.DFe.Core.Http;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -69,7 +71,7 @@ public class FiorilliWebService : NFSeWebserviceBase
 
     /// <summary>Inicializa o provedor com um transporte HTTP fornecido pelo host.</summary>
     public FiorilliWebService(ConfiguracaoNFSe configuracaoNFSe, NFSeServiceInfo serviceInfo,
-        INFSeHttpTransport httpTransport) : base(configuracaoNFSe, serviceInfo, httpTransport)
+        IDFeHttpTransport httpTransport) : base(configuracaoNFSe, serviceInfo, httpTransport)
     {
     }
 
@@ -250,9 +252,9 @@ public class FiorilliWebService : NFSeWebserviceBase
 
     /// <summary>
     /// Retorna a chave de acesso da NFS-e a partir do identificador do DPS.
-    /// Implementado via <c>consultarNfse</c> (filtro por <c>IdDPS</c>).
+    /// Implementado via <c>consultarNfse</c>.
     /// </summary>
-    /// <param name="id">Identificação do DPS.</param>
+    /// <param name="id">Id completo com 45 posições: literal <c>DPS</c> + município (7) + tipo de inscrição (1) + CPF/CNPJ (14) + série (5) + número da DPS (15).</param>
     /// <returns>Resposta da consulta contendo a chave de acesso.</returns>
     /// <param name="cancellationToken">Token para cancelar a operação assíncrona.</param>
     public override async Task<NFSeResponse<RespostaConsultaChaveDps>> ConsultaChaveDpsAsync(string id, CancellationToken cancellationToken = default)
@@ -274,7 +276,7 @@ public class FiorilliWebService : NFSeWebserviceBase
     /// <summary>
     /// Verifica se uma NFS-e foi emitida a partir do Id do DPS (via <c>consultarNfse</c>).
     /// </summary>
-    /// <param name="id">Identificação do DPS.</param>
+    /// <param name="id">Id completo com 45 posições no formato <c>DPS[0-9]{42}</c>.</param>
     /// <returns>True se existir, caso contrário false.</returns>
     /// <param name="cancellationToken">Token para cancelar a operação assíncrona.</param>
     public override async Task<bool> ConsultaExisteDpsAsync(string id, CancellationToken cancellationToken = default)
@@ -313,7 +315,7 @@ public class FiorilliWebService : NFSeWebserviceBase
         ValidarSchema(SchemaNFSe.Evento, eventoAssinado, evento.Versao);
 
         await GravarDpsEmDiscoAsync(eventoAssinado, $"{evento.Informacoes.ChNFSe}{evento.Informacoes.Evento}_evento.xml",
-            documento, evento.Informacoes.DhEvento.DateTime, true, cancellationToken);
+            documento, evento.Informacoes.DhEvento.DateTime, DFeArquivoExiste.LancarErro, cancellationToken);
 
         var corpo = $"<CancelarNFSeEnvio xmlns=\"{FiorilliSoap.NsFiorilli}\">" +
                     FiorilliSoap.Elemento("IM", inscricaoMunicipal) +
@@ -357,6 +359,7 @@ public class FiorilliWebService : NFSeWebserviceBase
 
     /// <summary>
     /// Não suportado pela Fiorilli (não há consulta de eventos por chave no WSDL).
+    /// Para consultar a própria NFS-e pela chave, utilize <see cref="ConsultarNFSeAsync"/>.
     /// </summary>
     public override Task<NFSeResponse<RespostaConsultaDFe>> ConsultaChaveAsync(string chave, CancellationToken cancellationToken = default) =>
         throw OperacaoNaoSuportada(nameof(ConsultaChaveAsync));
@@ -441,7 +444,7 @@ public class FiorilliWebService : NFSeWebserviceBase
         var headers = new[] { new KeyValuePair<string, string>("SOAPAction", $"\"{soapAction}\"") };
 
         using var httpResponse = await SendAsync(content, HttpMethod.Post, url, headers, cancellationToken: cancellationToken);
-        var resposta = await httpResponse.Content.ReadAsStringAsync();
+        var resposta = await LerRespostaAsync(httpResponse, cancellationToken);
 
         this.Log().Debug($"Fiorilli: [{soapAction}][Resposta] - {resposta}");
         await GravarArquivoEmDiscoAsync(resposta, $"{nomeArquivo}-resp.xml", documento);
